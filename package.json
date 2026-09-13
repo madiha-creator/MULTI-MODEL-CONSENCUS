@@ -1,0 +1,27 @@
+{
+  "name": "multimodal-consensus-broker",
+  "version": "1.0.0",
+  "description": "Edge telemetry system that detects sensor disagreement between parallel AI modules (vision vs depth) for the AI Infra Summit Hackathon.",
+  "main": "index.js",
+  "scripts": {
+    "mock": "node mock-generator/mockGenerator.js",
+    "broker": "node mock-generator/broker.js",
+    "mock:pipe": "node mock-generator/mockGenerator.js | node mock-generator/broker.js",
+    "server": "node websocket-server/server.js",
+    "dashboard": "echo \"Run dashboard build/start command here once Ammar sets up React\""
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "mongoose": "^8.7.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "telemetry",
+    "edge-ai",
+    "websocket",
+    "hackathon"
+  ],
+  "author": "Team: Ammar, Abdullah, Usman, Madeeha, Munizah, Malahil",
+  "license": "ISC"
+}
