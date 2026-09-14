@@ -1,20 +1,30 @@
 // Node Broker Module for Multi-Modal Consensus Broker
 // Receives mock telemetry data and processes/forwards in order
 // Designed to be later replaced with WebSocket pipeline
+//
+// Expected input format (JSON lines on stdin):
+// {
+//   "nodeId": "edge-node-01",
+//   "sensorType": "camera",
+//   "sequenceNo": 1042,
+//   "timestamp": 1726308737000,
+//   "coordinates": { "x": 12.45, "y": 3.14, "z": 0.88 },
+//   "confidence": 0.98
+// }
 
 const readline = require('readline');
 
-// Configuration
+// ─── Configuration ───────────────────────────────────────────────────────────
 const CONFIG = {
-  // In-memory queue for pending messages
-  maxQueueSize: 10000, // Safety limit
-  // Whether to enable console logging of processed data
+  maxQueueSize: 10000,
   logProcessed: true,
-  // Whether to enable consensus checking (compare vision vs depth)
-  enableConsensusCheck: true
+  enableConsensusCheck: true,
+
+  // Drift detection: flag when coordinate delta between modalities exceeds this
+  driftThreshold: 4.0
 };
 
-// Simple in-memory queue
+// ─── Simple in-memory FIFO queue ─────────────────────────────────────────────
 class MessageQueue {
   constructor(maxSize = CONFIG.maxQueueSize) {
     this.queue = [];
@@ -22,65 +32,66 @@ class MessageQueue {
     this.droppedCount = 0;
   }
 
-  // Add message to queue (FIFO)
   enqueue(message) {
     if (this.queue.length >= this.maxSize) {
       this.droppedCount++;
-      return false; // Queue overflow
+      return false;
     }
     this.queue.push(message);
     return true;
   }
 
-  // Remove and return oldest message
   dequeue() {
     if (this.isEmpty()) return null;
     return this.queue.shift();
   }
 
-  // Check if queue is empty
   isEmpty() {
     return this.queue.length === 0;
   }
 
-  // Get current queue size
   size() {
     return this.queue.length;
   }
 
-  // Get number of dropped messages
   getDroppedCount() {
     return this.droppedCount;
   }
 }
 
-// Broker class - coordinates message processing
+// ─── Broker: coordinates message processing and consensus checks ─────────────
 class Broker {
   constructor() {
     this.queue = new MessageQueue();
     this.messageCount = 0;
-    this.driftEvents = []; // Track detected drift events
-    this.visionMessagesByTimestamp = {}; // Cache vision messages by timestamp for alignment
+    this.driftEvents = [];
+    this.cameraMessagesByTimestamp = {}; // Cache camera readings for alignment
   }
 
-  // Process incoming raw JSON message
+  // Process an incoming raw JSON message (string or object)
   processMessage(data) {
     try {
       const message = typeof data === 'string' ? JSON.parse(data) : data;
 
       // Validate required fields
-      if (!message.deviceId || !message.source || !message.timestamp) {
+      if (!message.nodeId || !message.sensorType || !message.timestamp ||
+          !message.coordinates || !message.sequenceNo) {
         console.warn('Broker: Received malformed message, skipping:', message);
         return false;
       }
 
-      // Add to queue
+      // Guard: coordinates must have x, y, z
+      const c = message.coordinates;
+      if (typeof c.x !== 'number' || typeof c.y !== 'number' || typeof c.z !== 'number') {
+        console.warn('Broker: Message coordinates incomplete, skipping:', message);
+        return false;
+      }
+
       if (!this.queue.enqueue(message)) {
         console.error('Broker: Queue overflow, message dropped');
         return false;
       }
 
-      // Process all queued messages in order
       this.processQueue();
       return true;
     } catch (error) {
@@ -89,51 +100,51 @@ class Broker {
     }
   }
 
-  // Process all messages currently in queue
+  // Process all messages currently in queue (FIFO)
   processQueue() {
     while (!this.queue.isEmpty()) {
       const message = this.queue.dequeue();
       this.messageCount++;
 
-      // Cache vision messages by timestamp for cross-modality comparison
-      if (message.source === 'vision') {
-        this.visionMessagesByTimestamp[message.timestamp] = message;
+      // Cache camera messages by timestamp for cross-modality comparison
+      if (message.sensorType === 'camera') {
+        this.cameraMessagesByTimestamp[message.timestamp] = message;
       }
 
       // Log processed message
       if (CONFIG.logProcessed) {
-        console.log(`[Broker] #${this.messageCount} | ${message.source} | seq=${message.sequence} | x=${message.x.toFixed(2)}, y=${message.y.toFixed(2)}, z=${message.z.toFixed(2)}`);
+        const c = message.coordinates;
+        console.log(`[Broker] #${this.messageCount} | ${message.sensorType} | seq=${message.sequenceNo} | x=${c.x.toFixed(2)}, y=${c.y.toFixed(2)}, z=${c.z.toFixed(2)} | conf=${message.confidence}`);
       }
 
       // Check for consensus drift between modalities
-      if (CONFIG.enableConsensusCheck && message.source === 'depth') {
+      if (CONFIG.enableConsensusCheck && message.sensorType === 'depth') {
         this.checkConsensus(message);
       }
     }
   }
 
-  // Compare vision and depth readings to detect divergence
+  // Compare camera and depth readings at the same timestamp to detect divergence
   checkConsensus(depthMessage) {
-    // Look up the vision reading with the same timestamp
-    const visionMessage = this.visionMessagesByTimestamp[depthMessage.timestamp];
-    if (!visionMessage) return;
+    const depthTs = depthMessage.timestamp;
+    const cameraMessage = this.cameraMessagesByTimestamp[depthTs];
+    if (!cameraMessage) return;
 
-    const threshold = 4.0; // Coordinate difference threshold for drift detection
-    const dx = Math.abs(visionMessage.x - depthMessage.x);
-    const dy = Math.abs(visionMessage.y - depthMessage.y);
+    const dx = Math.abs(cameraMessage.coordinates.x - depthMessage.coordinates.x);
+    const dy = Math.abs(cameraMessage.coordinates.y - depthMessage.coordinates.y);
 
-    if (dx > threshold || dy > threshold) {
+    if (dx > CONFIG.driftThreshold || dy > CONFIG.driftThreshold) {
       const driftEvent = {
-        timestamp: depthMessage.timestamp,
-        deviceId: visionMessage.deviceId,
-        visionX: visionMessage.x,
-        visionY: visionMessage.y,
-        depthX: depthMessage.x,
-        depthY: depthMessage.y,
+        timestamp: depthTs,
+        nodeId: cameraMessage.nodeId,
+        cameraX: cameraMessage.coordinates.x,
+        cameraY: cameraMessage.coordinates.y,
+        depthX: depthMessage.coordinates.x,
+        depthY: depthMessage.coordinates.y,
         deltaX: dx.toFixed(3),
         deltaY: dy.toFixed(3),
-        threshold: threshold,
-        detectedAt: new Date().toISOString()
+        threshold: CONFIG.driftThreshold,
+        detectedAt: Date.now()
       };
       this.driftEvents.push(driftEvent);
       console.log(`\n*** DRIFT DETECTED *** ${JSON.stringify(driftEvent)}`);
@@ -152,15 +163,13 @@ class Broker {
   }
 }
 
-// Create a singleton broker instance
+// ─── Singleton instance and stdin reader ─────────────────────────────────────
 const broker = new Broker();
 
-// Function to read from stdin (pipe)
 function startStdinReader() {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
-    terminal: false // Important: don't echo input, just process lines
+    terminal: false // Don't echo; just process lines
   });
 
   process.stderr.write('Broker started. Waiting for telemetry data from stdin...\n');
@@ -179,13 +188,11 @@ function startStdinReader() {
     process.exit(0);
   });
 
-  // Handle errors
   rl.on('error', (err) => {
     console.error('Broker: stdin error:', err);
   });
 }
 
-// Print final statistics
 function printFinalStats() {
   const stats = broker.getStats();
   console.log('\n--- Broker Final Statistics ---');
@@ -199,7 +206,6 @@ function printFinalStats() {
 if (require.main === module) {
   startStdinReader();
 
-  // Handle graceful shutdown
   process.on('SIGINT', () => {
     printFinalStats();
     process.exit(0);
@@ -210,5 +216,4 @@ if (require.main === module) {
   });
 }
 
-// Export for use as a module (e.g., to plug into WebSocket server later)
 module.exports = { Broker, MessageQueue, broker };
