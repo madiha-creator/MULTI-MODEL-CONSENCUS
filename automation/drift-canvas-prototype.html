@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Drift Visualization Prototype</title>
+<style>
+  body {
+    background: #0B1220;
+    color: #E5E7EB;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+  h2 { color: #22D3EE; margin-bottom: 4px; }
+  p.sub { color: #94A3B8; margin-top: 0; font-size: 13px; }
+  canvas {
+    background: #131C2E;
+    border: 1px solid #1E293B;
+    border-radius: 8px;
+    margin-top: 16px;
+  }
+  .controls {
+    margin-top: 16px;
+    background: #131C2E;
+    padding: 14px 20px;
+    border-radius: 8px;
+    border: 1px solid #1E293B;
+  }
+  .controls label { font-size: 13px; color: #94A3B8; }
+  input[type=range] { width: 260px; accent-color: #22D3EE; }
+  #driftValue { font-family: monospace; color: #FBBF24; }
+</style>
+</head>
+<body>
+
+<h2>Multi-Modal Consensus Broker — Drift Visualization</h2>
+<p class="sub">Vision (cyan) vs Depth (magenta) sensor agreement, 4 edge nodes</p>
+
+<canvas id="driftCanvas" width="600" height="400"></canvas>
+
+<div class="controls">
+  <label for="driftSlider">Manual Drift Injection (testing):</label><br>
+  <input type="range" id="driftSlider" min="0" max="100" value="0">
+  <span id="driftValue">0</span>% simulated disagreement
+</div>
+
+<script>
+  const canvas = document.getElementById('driftCanvas');
+  const ctx = canvas.getContext('2d');
+  const slider = document.getElementById('driftSlider');
+  const driftValueLabel = document.getElementById('driftValue');
+
+  // 4 nodes, matching Abdullah's telemetry schema: nodeId, sensorType, coordinates, confidence
+  const nodes = [
+    { nodeId: 'edge-node-01', baseX: 120, baseY: 100 },
+    { nodeId: 'edge-node-02', baseX: 420, baseY: 100 },
+    { nodeId: 'edge-node-03', baseX: 120, baseY: 300 },
+    { nodeId: 'edge-node-04', baseX: 420, baseY: 300 }
+  ];
+
+  function driftOffset(seedFactor, driftPercent) {
+    // simple deterministic-ish offset scaled by slider value
+    const magnitude = (driftPercent / 100) * 40;
+    return (Math.sin(seedFactor) * magnitude);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const driftPercent = parseInt(slider.value, 10);
+    driftValueLabel.textContent = driftPercent;
+
+    nodes.forEach((node, i) => {
+      // vision sensor point
+      const visionX = node.baseX;
+      const visionY = node.baseY;
+
+      // depth sensor point, offset by simulated drift
+      const depthX = node.baseX + driftOffset(i + 1, driftPercent);
+      const depthY = node.baseY + driftOffset(i + 2, driftPercent);
+
+      const dx = depthX - visionX;
+      const dy = depthY - visionY;
+      const disagreement = Math.sqrt(dx * dx + dy * dy);
+
+      // color logic: green -> amber -> red based on disagreement magnitude
+      let lineColor = '#4ADE80';
+      if (disagreement > 25) lineColor = '#F87171';
+      else if (disagreement > 10) lineColor = '#FBBF24';
+
+      // connecting line (vector between vision & depth reading)
+      ctx.beginPath();
+      ctx.moveTo(visionX, visionY);
+      ctx.lineTo(depthX, depthY);
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // vision node (cyan)
+      ctx.beginPath();
+      ctx.arc(visionX, visionY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#22D3EE';
+      ctx.fill();
+
+      // depth node (magenta)
+      ctx.beginPath();
+      ctx.arc(depthX, depthY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#C084FC';
+      ctx.fill();
+
+      // label
+      ctx.fillStyle = '#E5E7EB';
+      ctx.font = '12px monospace';
+      ctx.fillText(node.nodeId, node.baseX - 20, node.baseY - 20);
+      ctx.fillStyle = lineColor;
+      ctx.fillText(disagreement.toFixed(1) + ' drift', node.baseX - 20, node.baseY + 35);
+    });
+  }
+
+  slider.addEventListener('input', draw);
+  draw();
+</script>
+
+</body>
+</html>
