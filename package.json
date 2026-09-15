@@ -7,9 +7,15 @@
     "mock": "node mock-generator/mockGenerator.js",
     "broker": "node mock-generator/broker.js",
     "mock:pipe": "node mock-generator/mockGenerator.js | node mock-generator/broker.js",
-    "server": "node websocket-server/server.js",
+    "server": "node --env-file-if-exists=.env websocket-server/server.js",
     "test:ws": "node websocket-server/testClient.js",
+    "test:db": "node --env-file-if-exists=.env database/testDb.js",
     "ws:pipe": "node mock-generator/mockGenerator.js | node websocket-server/wsBridge.js",
+    "db:up": "docker compose up -d mongo",
+    "db:down": "docker compose down",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
     "dashboard": "echo \"Run dashboard build/start command here once Ammar sets up React\""
   },
   "dependencies": {

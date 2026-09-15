@@ -10,6 +10,7 @@ const http = require('http');
 const express = require('express');
 const WebSocket = require('ws');
 const { ArbitrationEngine } = require('./arbitrationEngine');
+const database = require('../database'); // Data Persistence & Routing (Muhammad Usman)
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 const PORT = process.env.WS_PORT || process.env.PORT || 8080;
@@ -41,6 +42,17 @@ const arbitrationEngine = new ArbitrationEngine({
 const clients = new Set();
 let messageCount = 0;
 
+// ─── Resource Tracking (Infrastructure Deployment — Muhammad Usman) ───────────
+function getResourceUsage() {
+  const mem = process.memoryUsage();
+  return {
+    uptimeSeconds: Math.floor(process.uptime()),
+    memoryRssMb: parseFloat((mem.rss / 1024 / 1024).toFixed(2)),
+    heapUsedMb: parseFloat((mem.heapUsed / 1024 / 1024).toFixed(2)),
+    messagesIngested: messageCount,
+  };
+}
+
 // ─── REST Endpoints ──────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({
@@ -48,13 +60,55 @@ app.get('/health', (req, res) => {
     service: 'Multi-Modal Consensus Telemetry Core Engine',
     port: PORT,
     connectedClients: clients.size,
-    uptimeSeconds: Math.floor(process.uptime()),
-    engineStats: arbitrationEngine.getStats()
+    dbConnected: database.connected(),
+    resources: getResourceUsage(),
+    engineStats: arbitrationEngine.getStats(),
+    persistenceStats: database.persistence.getStats()
   });
 });
 
 app.get('/api/stats', (req, res) => {
-  res.json(arbitrationEngine.getStats());
+  res.json({
+    engine: arbitrationEngine.getStats(),
+    persistence: database.persistence.getStats(),
+    resources: getResourceUsage(),
+  });
+});
+
+// ─── Persistence Query Endpoints (Data Persistence & Routing — Muhammad Usman) ─
+app.get('/api/drift-events', async (req, res) => {
+  try {
+    const { nodeId, limit } = req.query;
+    const events = await database.queries.recentDriftEvents({
+      nodeId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/readings', async (req, res) => {
+  try {
+    const { nodeId, sensorType, limit } = req.query;
+    const readings = await database.queries.recentReadings({
+      nodeId,
+      sensorType,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    res.json(readings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/summary', async (req, res) => {
+  try {
+    res.json(await database.queries.summary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/config', (req, res) => {
@@ -108,6 +162,9 @@ wss.on('connection', (ws, req) => {
       // Execute continuous running variance matrix math & arbitration
       const arbitrationPacket = arbitrationEngine.processReading(reading);
 
+      // Persist to MongoDB (non-blocking, buffered — never stalls the hot path)
+      database.persistence.ingest(arbitrationPacket);
+
       // Broadcast telemetry + continuous variance matrix + arbitration alerts to ALL connected dashboard clients
       broadcast(arbitrationPacket);
 
@@ -144,16 +201,40 @@ function broadcast(data) {
   }
 }
 
-// Start Server
-if (require.main === module) {
+// ─── Startup & Graceful Shutdown (Deployment — Muhammad Usman) ─────────────────
+async function start() {
+  // Connect to MongoDB (non-fatal: server runs in degraded mode if DB is down)
+  await database.connect();
+  database.persistence.start();
+
   server.listen(PORT, () => {
     console.log(`=======================================================`);
     console.log(`🚀 Multi-Modal Telemetry Core WebSocket Server Running`);
     console.log(`📡 Listening on: ws://localhost:${PORT}`);
     console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
+    console.log(`🗄️  Persistence: ${database.connected() ? 'MongoDB connected' : 'DEGRADED (no DB)'}`);
     console.log(`⚡ Target Latency: < 4ms (Mathematical Arbitration Layer Active)`);
     console.log(`=======================================================`);
   });
 }
 
-module.exports = { app, server, wss, arbitrationEngine, broadcast };
+async function shutdown(signal) {
+  console.log(`\n[Server] ${signal} received — flushing buffers and shutting down...`);
+  try {
+    await database.persistence.stop(); // flush remaining telemetry to MongoDB
+    await database.disconnect();
+  } catch (err) {
+    console.error('[Server] Error during shutdown:', err.message);
+  }
+  server.close(() => process.exit(0));
+  // Force-exit if connections linger past the flush window.
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+
+if (require.main === module) {
+  start();
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+module.exports = { app, server, wss, arbitrationEngine, broadcast, start, shutdown };

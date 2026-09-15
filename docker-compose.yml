@@ -1,0 +1,44 @@
+# Multi-Modal Consensus Broker — local dev/prod stack
+# Infrastructure Deployment — Muhammad Usman
+#
+# Brings up the Telemetry Core Engine + a local MongoDB.
+#   docker compose up --build          # start the stack
+#   docker compose up -d mongo         # just the DB (run the server locally)
+#
+# For production against MongoDB Atlas, set MONGODB_URI in .env to the Atlas
+# connection string and start only the `server` service (the mongo service and
+# its depends_on are ignored when you `docker compose up server`).
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: consensus-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: .
+    container_name: consensus-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # Defaults to the local mongo service; override in .env for Atlas.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/consensus_broker}
+      DRIFT_THRESHOLD: ${DRIFT_THRESHOLD:-4.0}
+      PORT: 8080
+      NODE_ENV: production
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
