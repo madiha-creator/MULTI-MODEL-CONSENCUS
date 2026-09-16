@@ -50,3 +50,12 @@ Node structure follows the telemetry schema confirmed by Muhammad Abdullah:
   "coordinates": { "x": 12.45, "y": 3.14, "z": 0.88 },
   "confidence": 0.98
 }
+
+## Status: Live-tested (16 Sep)
+
+Successfully tested against the running WebSocket server (`npm run server`) 
+and live mock data (`npm run ws:pipe`). Confirmed:
+- Real-time connection to ws://localhost:8080
+- Correct parsing of TELEMETRY_ARBITRATED packets
+- Sub-1ms arbitration latency observed (target was <4ms)
+- Node agreement/drift counters update live from real arbitration results
