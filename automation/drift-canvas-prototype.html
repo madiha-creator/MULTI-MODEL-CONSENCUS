@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Drift Visualization Prototype</title>
+<title>Live Drift Visualization</title>
 <style>
   body {
     background: #0B1220;
@@ -36,111 +36,153 @@
   }
   .stat-card .label { font-size: 12px; color: #94A3B8; }
   .stat-card .value { font-family: monospace; font-size: 22px; font-weight: bold; }
-  .controls {
-    margin-top: 16px;
-    background: #131C2E;
-    padding: 14px 20px;
-    border-radius: 8px;
-    border: 1px solid #1E293B;
-  }
-  .controls label { font-size: 13px; color: #94A3B8; }
-  input[type=range] { width: 260px; accent-color: #22D3EE; }
-  #driftValue { font-family: monospace; color: #FBBF24; }
+  #connStatus { margin-top: 10px; font-family: monospace; font-size: 13px; }
+  .connected { color: #4ADE80; }
+  .disconnected { color: #F87171; }
 </style>
 </head>
 <body>
 
-<h2>Multi-Modal Consensus Broker — Drift Visualization</h2>
-<p class="sub">Vision (cyan) vs Depth (magenta) sensor agreement, 4 edge nodes</p>
+<h2>Multi-Modal Consensus Broker — Live Drift Visualization</h2>
+<p class="sub">Real-time vision vs depth sensor arbitration, via ws://localhost:8080</p>
+<div id="connStatus" class="disconnected">Connecting...</div>
 
 <div class="summary">
   <div class="stat-card">
     <div class="label">Nodes in Agreement</div>
-    <div class="value" id="agreeCount" style="color:#4ADE80;">4</div>
+    <div class="value" id="agreeCount" style="color:#4ADE80;">0</div>
   </div>
   <div class="stat-card">
     <div class="label">Nodes in Drift</div>
     <div class="value" id="driftCount" style="color:#F87171;">0</div>
   </div>
   <div class="stat-card">
-    <div class="label">Avg Disagreement</div>
-    <div class="value" id="avgDisagreement" style="color:#FBBF24;">0.0</div>
+    <div class="label">Last Latency (ms)</div>
+    <div class="value" id="lastLatency" style="color:#FBBF24;">--</div>
   </div>
 </div>
 
 <canvas id="driftCanvas" width="600" height="400"></canvas>
 
-<div class="controls">
-  <label for="driftSlider">Manual Drift Injection (testing):</label><br>
-  <input type="range" id="driftSlider" min="0" max="100" value="0">
-  <span id="driftValue">0</span>% simulated disagreement
-</div>
-
 <script>
   const canvas = document.getElementById('driftCanvas');
   const ctx = canvas.getContext('2d');
-  const slider = document.getElementById('driftSlider');
-  const driftValueLabel = document.getElementById('driftValue');
+  const connStatus = document.getElementById('connStatus');
   const agreeCountEl = document.getElementById('agreeCount');
   const driftCountEl = document.getElementById('driftCount');
-  const avgDisagreementEl = document.getElementById('avgDisagreement');
+  const lastLatencyEl = document.getElementById('lastLatency');
 
-  // 4 nodes, matching Abdullah's telemetry schema: nodeId, sensorType, coordinates, confidence
-  const nodes = [
-    { nodeId: 'edge-node-01', baseX: 120, baseY: 100 },
-    { nodeId: 'edge-node-02', baseX: 420, baseY: 100 },
-    { nodeId: 'edge-node-03', baseX: 120, baseY: 300 },
-    { nodeId: 'edge-node-04', baseX: 420, baseY: 300 }
+  // Stores latest known state per nodeId: { camera: {...}, depth: {...}, arbitration: {...} }
+  const nodeState = {};
+
+  // Fixed screen positions per nodeId so the layout stays stable across frames
+  const nodePositions = {};
+  let nextSlot = 0;
+  const slots = [
+    { x: 150, y: 120 }, { x: 450, y: 120 },
+    { x: 150, y: 300 }, { x: 450, y: 300 }
   ];
 
-  const DRIFT_THRESHOLD = 10; // above this = counted as "in drift"
+  function getPosition(nodeId) {
+    if (!nodePositions[nodeId]) {
+      nodePositions[nodeId] = slots[nextSlot % slots.length];
+      nextSlot++;
+    }
+    return nodePositions[nodeId];
+  }
 
-  function driftOffset(seedFactor, driftPercent) {
-    const magnitude = (driftPercent / 100) * 40;
-    return (Math.sin(seedFactor) * magnitude);
+  function connect() {
+    const ws = new WebSocket('ws://localhost:8080');
+
+    ws.onopen = () => {
+      connStatus.textContent = 'Connected to live telemetry server';
+      connStatus.className = 'connected';
+    };
+
+    ws.onclose = () => {
+      connStatus.textContent = 'Disconnected — retrying in 2s...';
+      connStatus.className = 'disconnected';
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = () => {
+      connStatus.textContent = 'Connection error';
+      connStatus.className = 'disconnected';
+    };
+
+    ws.onmessage = (event) => {
+      let packet;
+      try {
+        packet = JSON.parse(event.data);
+      } catch (e) {
+        return; // ignore malformed messages
+      }
+
+      if (packet.type !== 'TELEMETRY_ARBITRATED') return;
+
+      const nodeId = packet.nodeId;
+      if (!nodeState[nodeId]) nodeState[nodeId] = {};
+
+      // Store this sensor's latest reading (camera or depth)
+      if (packet.sensorType === 'camera' || packet.sensorType === 'depth') {
+        nodeState[nodeId][packet.sensorType] = packet.coordinates;
+      }
+
+      // Store the latest arbitration result / latency, whatever fields exist
+      if (packet.arbitration) {
+        nodeState[nodeId].arbitration = packet.arbitration;
+      }
+      if (typeof packet.executionLatencyMs === 'number') {
+        lastLatencyEl.textContent = packet.executionLatencyMs.toFixed(2);
+      }
+
+      draw();
+    };
   }
 
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const driftPercent = parseInt(slider.value, 10);
-    driftValueLabel.textContent = driftPercent;
 
     let agreeCount = 0;
     let driftCount = 0;
-    let totalDisagreement = 0;
 
-    nodes.forEach((node, i) => {
-      const visionX = node.baseX;
-      const visionY = node.baseY;
+    Object.keys(nodeState).forEach((nodeId) => {
+      const state = nodeState[nodeId];
+      const pos = getPosition(nodeId);
 
-      const depthX = node.baseX + driftOffset(i + 1, driftPercent);
-      const depthY = node.baseY + driftOffset(i + 2, driftPercent);
+      const cam = state.camera;
+      const depth = state.depth;
 
-      const dx = depthX - visionX;
-      const dy = depthY - visionY;
-      const disagreement = Math.sqrt(dx * dx + dy * dy);
-      totalDisagreement += disagreement;
+      // Determine drift using arbitration result if present, else fallback distance calc
+      let disagreement = 0;
+      let isDrift = false;
 
-      let lineColor = '#4ADE80';
-      if (disagreement > 25) {
-        lineColor = '#F87171';
-        driftCount++;
-      } else if (disagreement > DRIFT_THRESHOLD) {
-        lineColor = '#FBBF24';
-        driftCount++;
-      } else {
-        agreeCount++;
+      if (state.arbitration && typeof state.arbitration.distance === 'number') {
+        disagreement = state.arbitration.distance;
+        isDrift = !!state.arbitration.disagreementDetected;
+      } else if (cam && depth) {
+        const dx = (depth.x ?? 0) - (cam.x ?? 0);
+        const dy = (depth.y ?? 0) - (cam.y ?? 0);
+        const dz = (depth.z ?? 0) - (cam.z ?? 0);
+        disagreement = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        isDrift = disagreement > 4.0; // matches DRIFT_THRESHOLD default
       }
 
+      if (isDrift) driftCount++; else agreeCount++;
+
+      const lineColor = isDrift ? '#F87171' : '#4ADE80';
+      const camX = pos.x, camY = pos.y;
+      const depthX = pos.x + 40, depthY = pos.y + 20; // fixed small visual offset, real magnitude shown as text
+
       ctx.beginPath();
-      ctx.moveTo(visionX, visionY);
+      ctx.moveTo(camX, camY);
       ctx.lineTo(depthX, depthY);
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = 2;
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(visionX, visionY, 8, 0, Math.PI * 2);
+      ctx.arc(camX, camY, 8, 0, Math.PI * 2);
       ctx.fillStyle = '#22D3EE';
       ctx.fill();
 
@@ -151,18 +193,16 @@
 
       ctx.fillStyle = '#E5E7EB';
       ctx.font = '12px monospace';
-      ctx.fillText(node.nodeId, node.baseX - 20, node.baseY - 20);
+      ctx.fillText(nodeId, camX - 20, camY - 20);
       ctx.fillStyle = lineColor;
-      ctx.fillText(disagreement.toFixed(1) + ' drift', node.baseX - 20, node.baseY + 35);
+      ctx.fillText(disagreement.toFixed(2) + ' drift', camX - 20, camY + 45);
     });
 
     agreeCountEl.textContent = agreeCount;
     driftCountEl.textContent = driftCount;
-    avgDisagreementEl.textContent = (totalDisagreement / nodes.length).toFixed(1);
   }
 
-  slider.addEventListener('input', draw);
-  draw();
+  connect();
 </script>
 
 </body>
