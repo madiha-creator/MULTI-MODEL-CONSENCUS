@@ -9,7 +9,7 @@ Edge telemetry system that acts as a sensor disagreement arbitrator — it compa
 
 ```
 multimodal-consensus-broker/
-├── mock-generator/     ← Madeeha (mock sensor data + broker/queue logic)
+├── mock-generator/     ← Madeha Shah (mock sensor data + broker/queue logic)
 ├── websocket-server/   ← Muhammad Abdullah (telemetry WebSocket pipeline)
 ├── database/           ← Muhammad Usman (Mongoose/MongoDB schemas, deployment)
 ├── dashboard/          ← Muhammad Ammar (React canvas dashboard)
@@ -51,6 +51,6 @@ This pipes simulated vision/depth sensor data into the broker, which detects and
 | Muhammad Ammar | Full Stack & Agentic AI |
 | Muhammad Abdullah | Backend & Agentic AI |
 | Muhammad Usman | Backend, Agentic AI & Deployment |
-| Madeeha | Agents & Backend |
+| Madeha Shah | Agents & Backend |
 | Munizah | LLM Testing/Eval & Prompt Content |
 | Malahil Ghauri | System UI & Claude Automation |
