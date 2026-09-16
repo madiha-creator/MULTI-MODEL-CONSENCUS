@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg-primary: #f8fafc;
+  --color-bg-secondary: #f1f5f9;
+  --color-bg-tertiary: #e2e8f0;
+  --color-bg-card: #ffffff;
+  --color-text: #0f172a;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94a3b8;
+  --color-accent: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-border: #e2e8f0;
+  --color-risk-low: #22c55e;
+  --color-risk-medium: #f59e0b;
+  --color-risk-high: #f97316;
+  --color-risk-critical: #ef4444;
+}
+
+[data-theme="dark"] {
+  --color-bg-primary: #060a13;
+  --color-bg-secondary: #0c1221;
+  --color-bg-tertiary: #151d2e;
+  --color-bg-card: #0f1729;
+  --color-text: #e8ecf4;
+  --color-text-primary: #e8ecf4;
+  --color-text-secondary: #8b97b0;
+  --color-text-muted: #4a5568;
+  --color-accent: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-border: #1a2438;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: "Geist", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-bg-tertiary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* Mono numbers utility */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.font-mono { font-family: "Geist Mono", "SF Mono", "Fira Code", monospace; }
+
+/* Pulse animation for critical states */
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--color-error); }
+  50% { border-color: transparent; }
+}
+.animate-pulse-border {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+/* Flash animation for new events */
+@keyframes flash-in {
+  0% { background-color: var(--color-accent); }
+  100% { background-color: transparent; }
+}
+.animate-flash {
+  animation: flash-in 0.6s ease-out;
+}
+
+/* StateMesh pipeline — packets are zero-length round-cap dashes marching
+   along an edge path (drawn source→target; negative offset flows forward).
+   Pure CSS so React attribute patches never restart the animation, and a
+   class on the <svg> freezes the whole mesh when transport drops. */
+@keyframes pipeline-flow {
+  to { stroke-dashoffset: -36; }
+}
+.pipeline-flow {
+  stroke-dasharray: 0 36;
+  stroke-linecap: round;
+  animation: pipeline-flow 0.9s linear infinite;
+}
+
+/* Disagreement alert on a sensor's feed edge */
+@keyframes pipeline-edge-alert {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.25; }
+}
+.pipeline-alert {
+  animation: pipeline-edge-alert 1.2s ease-in-out infinite;
+}
+
+/* Transport down: freeze packets and dim the mesh (headers stay legible) */
+.pipeline-paused .pipeline-flow,
+.pipeline-paused .pipeline-alert,
+.pipeline-paused .pipeline-node-pulse {
+  animation-play-state: paused;
+}
+.pipeline-dim {
+  opacity: 0.45;
+  transition: opacity 0.4s;
+}
+
+/* Broker "processing" tick flash — remounted via key per consensus frame */
+@keyframes pipeline-node-pulse {
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.08); }
+}
+.pipeline-node-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pipeline-node-pulse 0.9s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-flow,
+  .pipeline-alert,
+  .pipeline-node-pulse {
+    animation: none;
+  }
+  /* Dots stay painted (static) — "this edge is live" survives the setting;
+     the pulse ring just never appears. */
+}
