@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consensus Broker — Telemetry Core</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #020617;
+      --panel:     #0b1220;
+      --panel-2:   #0f172a;
+      --line:      #1e293b;
+      --line-soft: #172033;
+      --text:      #f8fafc;
+      --muted:     #94a3b8;
+      --dim:       #64748b;
+      --camera:    #22d3ee;  /* cyan  — camera modality */
+      --depth:     #f59e0b;  /* amber — depth modality  */
+      --ok:        #22c55e;  /* consensus */
+      --alert:     #ef4444;  /* disagreement anomaly */
+      --alert-dim: #7f1d1d;
+      --mono: "Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: "Fira Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    a { color: var(--camera); }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #0a1120 0%, var(--bg) 100%);
+      position: sticky; top: 0; z-index: 30;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+    .logo {
+      width: 34px; height: 34px; border-radius: 8px; flex: none;
+      background: radial-gradient(circle at 30% 30%, #164e63, #020617 70%);
+      border: 1px solid var(--line);
+      display: grid; place-items: center;
+    }
+    .logo svg { width: 20px; height: 20px; }
+    .brand h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+    .brand .sub { font-size: 11.5px; color: var(--dim); font-family: var(--mono); }
+
+    .status { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12.5px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex: none; }
+    .dot.live   { background: var(--ok);   box-shadow: 0 0 10px var(--ok);   animation: pulse 2s infinite; }
+    .dot.down   { background: var(--alert);box-shadow: 0 0 10px var(--alert); }
+    .dot.wait   { background: var(--depth);box-shadow: 0 0 10px var(--depth); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .conn { display: flex; align-items: center; gap: 8px; }
+    .conn input {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 7px; padding: 7px 10px; font-family: var(--mono); font-size: 12px; width: 260px;
+    }
+    .conn input:focus { outline: 2px solid var(--camera); outline-offset: 0; border-color: transparent; }
+    button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 7px; padding: 7px 13px; font-family: var(--mono); font-size: 12px;
+      cursor: pointer; transition: background .18s, border-color .18s, color .18s;
+    }
+    button:hover { background: #16233b; border-color: #2b3b57; }
+    button:focus-visible { outline: 2px solid var(--camera); outline-offset: 2px; }
+
+    /* ── Layout ─────────────────────────────────────────── */
+    main { padding: 18px 22px 28px; max-width: 1500px; margin: 0 auto; }
+    .kpis {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;
+    }
+    .grid {
+      display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; align-items: start;
+    }
+    .col { display: flex; flex-direction: column; gap: 16px; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card h2 {
+      font-size: 11.5px; text-transform: uppercase; letter-spacing: 1.4px;
+      color: var(--muted); margin: 0 0 12px; font-weight: 600; font-family: var(--mono);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card h2 .tag { margin-left: auto; font-size: 10.5px; letter-spacing: .5px; color: var(--dim); text-transform: none; }
+
+    /* KPI tiles */
+    .kpi { background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
+    .kpi .label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); }
+    .kpi .value { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1.1; margin-top: 6px; letter-spacing: -.5px; }
+    .kpi .value small { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .kpi .foot { font-size: 11px; color: var(--dim); margin-top: 4px; font-family: var(--mono); }
+    .kpi.alert .value { color: var(--alert); text-shadow: 0 0 14px rgba(239,68,68,.4); }
+    .kpi.good  .value { color: var(--ok); }
+
+    /* Canvas */
+    .stage { position: relative; }
+    canvas { display: block; width: 100%; border-radius: 8px; background: #060b17; }
+    .legend { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+    .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+    .readout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; font-family: var(--mono); font-size: 12.5px; }
+    .readout .k { color: var(--dim); }
+    .readout .v { color: var(--text); text-align: right; }
+
+    /* Event log */
+    .log { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .log::-webkit-scrollbar { width: 8px; }
+    .log::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+    .evt {
+      border: 1px solid var(--alert-dim); background: rgba(239,68,68,.06);
+      border-left: 3px solid var(--alert); border-radius: 8px; padding: 9px 12px;
+      font-family: var(--mono); font-size: 12px; animation: slidein .25s ease;
+    }
+    @keyframes slidein { from { opacity: 0; transform: translateY(-6px);} to {opacity:1; transform:none;} }
+    .evt .row1 { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .evt .node { color: var(--text); font-weight: 600; }
+    .evt .time { margin-left: auto; color: var(--dim); font-size: 11px; }
+    .evt .metrics { color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+    .evt .metrics b { color: var(--alert); font-weight: 600; }
+    .badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 5px; letter-spacing: .5px;
+      background: var(--alert); color: #fff; font-weight: 600;
+    }
+    .empty { color: var(--dim); font-family: var(--mono); font-size: 12.5px; text-align: center; padding: 40px 0; }
+
+    /* Threshold control */
+    .ctrl { display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 12px; }
+    .ctrl input[type=range] { flex: 1; accent-color: var(--camera); cursor: pointer; }
+    .ctrl .tv { color: var(--camera); min-width: 42px; text-align: right; font-weight: 600; }
+
+    .bar { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .bar .fill { height: 6px; border-radius: 4px; background: var(--line); flex: 1; overflow: hidden; }
+    .bar .fill i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .3s; }
+
+    @media (max-width: 1050px) {
+      .grid { grid-template-columns: 1fr; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .conn input { width: 160px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Multi-Modal Consensus Broker</h1>
+        <div class="sub">Telemetry Core Engine · camera ⇄ depth arbitration</div>
+      </div>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">connecting…</span></div>
+    <div class="conn">
+      <label for="wsUrl" style="position:absolute;left:-9999px">WebSocket URL</label>
+      <input id="wsUrl" spellcheck="false" />
+      <button id="reconnect" type="button">Reconnect</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis">
+      <div class="card kpi"><div class="label">Frames Processed</div><div class="value" id="k_frames">0</div><div class="foot" id="k_rate">0 fps</div></div>
+      <div class="card kpi"><div class="label">Arbitrated Pairs</div><div class="value" id="k_pairs">0</div><div class="foot">camera+depth aligned</div></div>
+      <div class="card kpi" id="tile_dis"><div class="label">Disagreements</div><div class="value" id="k_dis">0</div><div class="foot" id="k_disrate">0.0% of pairs</div></div>
+      <div class="card kpi" id="tile_lat"><div class="label">Avg Latency</div><div class="value" id="k_lat">—<small> ms</small></div><div class="foot">target &lt; 4.0 ms</div></div>
+      <div class="card kpi good"><div class="label">Under 4ms</div><div class="value" id="k_under">—<small> %</small></div><div class="foot" id="k_last">last: — ms</div></div>
+    </section>
+
+    <div class="grid">
+      <div class="col">
+        <div class="card stage">
+          <h2>Spatial Divergence <span class="tag" id="stageTag">x / y projection</span></h2>
+          <canvas id="scatter" width="900" height="460" role="img" aria-label="Live scatter plot of camera versus depth sensor coordinates"></canvas>
+          <div class="legend">
+            <span><i class="swatch" style="background:var(--camera)"></i>Camera</span>
+            <span><i class="swatch" style="background:var(--depth)"></i>Depth</span>
+            <span><i class="swatch" style="background:var(--ok)"></i>Consensus link</span>
+            <span><i class="swatch" style="background:var(--alert)"></i>Disagreement link</span>
+            <span style="margin-left:auto;color:var(--dim)" id="dbState">db: —</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Arbitration Latency <span class="tag">last 120 frames · ms</span></h2>
+          <canvas id="spark" width="900" height="120" role="img" aria-label="Sparkline of recent arbitration latency"></canvas>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card">
+          <h2>Live Frame</h2>
+          <div class="readout">
+            <span class="k">Node</span><span class="v" id="r_node">—</span>
+            <span class="k">Sequence</span><span class="v" id="r_seq">—</span>
+            <span class="k">Camera (x,y,z)</span><span class="v" id="r_cam">—</span>
+            <span class="k">Depth (x,y,z)</span><span class="v" id="r_dep">—</span>
+            <span class="k">Δ Euclidean</span><span class="v" id="r_dist">—</span>
+            <span class="k">Divergence z</span><span class="v" id="r_div">—</span>
+            <span class="k">Confidence</span><span class="v" id="r_conf">—</span>
+            <span class="k">Status</span><span class="v" id="r_stat">—</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Drift Threshold <span class="tag">live · POST /api/config</span></h2>
+          <div class="ctrl">
+            <span>1.0</span>
+            <input type="range" id="thr" min="1" max="10" step="0.5" value="4" aria-label="Drift threshold" />
+            <span>10</span>
+            <span class="tv" id="thrVal">4.0</span>
+          </div>
+          <div class="bar" style="margin-top:12px">
+            <span>consensus</span>
+            <span class="fill"><i id="consBar"></i></span>
+            <span id="consPct">—</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Drift Anomaly Log <span class="tag" id="logCount">0 events</span></h2>
+          <div class="log" id="log"><div class="empty">Awaiting telemetry stream…</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // ── WebSocket URL: same-origin when served; localhost when opened as file:// ──
+    function defaultWsUrl() {
+      if (location.protocol === 'file:' || !location.host) return 'ws://localhost:8080';
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return proto + '//' + location.host;
+    }
+
+    const el = (id) => document.getElementById(id);
+    const wsUrlInput = el('wsUrl');
+    wsUrlInput.value = defaultWsUrl();
+
+    // ── State ──
+    const state = {
+      frames: 0, pairs: 0, disagreements: 0,
+      latSum: 0, latCount: 0, under4: 0,
+      lastLat: null, threshold: 4.0,
+      latHist: [], trail: [], events: 0,
+    };
+    let ws = null, reconnectTimer = null, backoff = 1000, rateWin = [];
+
+    // ── Connection ──
+    function setStatus(cls, text) {
+      const dot = el('dot');
+      dot.className = 'dot ' + cls;
+      el('statusText').textContent = text;
+    }
+
+    function connect() {
+      clearTimeout(reconnectTimer);
+      const url = wsUrlInput.value.trim();
+      setStatus('wait', 'connecting…');
+      try { ws = new WebSocket(url); }
+      catch (e) { setStatus('down', 'bad URL'); return; }
+
+      ws.onopen = () => { setStatus('live', 'live · ' + url.replace(/^wss?:\/\//, '')); backoff = 1000; };
+      ws.onclose = () => { setStatus('down', 'disconnected · retrying'); scheduleReconnect(); };
+      ws.onerror = () => { setStatus('down', 'connection error'); };
+      ws.onmessage = (ev) => { try { handle(JSON.parse(ev.data)); } catch (_) {} };
+    }
+    function scheduleReconnect() {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, backoff);
+      backoff = Math.min(backoff * 1.6, 10000);
+    }
+    el('reconnect').onclick = () => { if (ws) try { ws.close(); } catch (_) {} connect(); };
+    wsUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('reconnect').click(); });
+
+    // ── Message handling ──
+    function handle(msg) {
+      if (msg.type === 'SYSTEM_CONNECTED') {
+        if (msg.config && typeof msg.config.driftThreshold === 'number') {
+          state.threshold = msg.config.driftThreshold;
+          el('thr').value = state.threshold;
+          el('thrVal').textContent = state.threshold.toFixed(1);
+        }
+        return;
+      }
+      if (msg.type !== 'TELEMETRY_ARBITRATED') return;
+
+      state.frames++;
+      rateWin.push(performance.now());
+
+      // latency
+      if (typeof msg.executionLatencyMs === 'number') {
+        state.lastLat = msg.executionLatencyMs;
+        state.latSum += msg.executionLatencyMs;
+        state.latCount++;
+        if (msg.underTargetLatency) state.under4++;
+        state.latHist.push(msg.executionLatencyMs);
+        if (state.latHist.length > 120) state.latHist.shift();
+      }
+
+      const ar = msg.arbitrationResult;
+      if (ar) {
+        state.pairs++;
+        if (ar.disagreementDetected) { state.disagreements++; pushEvent(ar, msg); }
+        state.trail.push({ c: ar.cameraCoordinates, d: ar.depthCoordinates, bad: ar.disagreementDetected });
+        if (state.trail.length > 40) state.trail.shift();
+        updateReadout(ar, msg);
+      }
+      updateKpis();
+    }
+
+    function updateReadout(ar, msg) {
+      const f = (n) => (typeof n === 'number' ? n.toFixed(2) : '—');
+      const c = ar.cameraCoordinates, d = ar.depthCoordinates;
+      el('r_node').textContent = msg.nodeId || '—';
+      el('r_seq').textContent = msg.sequenceNo != null ? msg.sequenceNo : '—';
+      el('r_cam').textContent = `${f(c.x)}, ${f(c.y)}, ${f(c.z)}`;
+      el('r_dep').textContent = `${f(d.x)}, ${f(d.y)}, ${f(d.z)}`;
+      el('r_dist').textContent = f(ar.euclideanDistance);
+      el('r_div').textContent = f(ar.divergenceScore);
+      el('r_conf').textContent = msg.reading && msg.reading.confidence != null ? msg.reading.confidence.toFixed(2) : '—';
+      const stat = el('r_stat');
+      stat.textContent = ar.status || '—';
+      stat.style.color = ar.disagreementDetected ? 'var(--alert)' : 'var(--ok)';
+    }
+
+    function pushEvent(ar, msg) {
+      state.events++;
+      const log = el('log');
+      const empty = log.querySelector('.empty');
+      if (empty) empty.remove();
+      const d = ar.deltaVector || {};
+      const t = new Date(msg.timestamp || Date.now()).toLocaleTimeString();
+      const node = document.createElement('div');
+      node.className = 'evt';
+      node.innerHTML =
+        '<div class="row1"><span class="node"></span><span class="badge">ANOMALY</span><span class="time"></span></div>' +
+        '<div class="metrics"><span>Δ <b></b></span><span>z-div <b></b></span><span>vec <b></b></span></div>';
+      node.querySelector('.node').textContent = msg.nodeId || 'unknown';
+      node.querySelector('.time').textContent = t;
+      const b = node.querySelectorAll('.metrics b');
+      b[0].textContent = (ar.euclideanDistance != null ? ar.euclideanDistance.toFixed(2) : '?') + ' > ' + (ar.threshold ?? state.threshold);
+      b[1].textContent = ar.divergenceScore != null ? ar.divergenceScore.toFixed(2) : '?';
+      b[2].textContent = `(${(d.x??0).toFixed(1)}, ${(d.y??0).toFixed(1)}, ${(d.z??0).toFixed(1)})`;
+      log.insertBefore(node, log.firstChild);
+      while (log.children.length > 60) log.removeChild(log.lastChild);
+      el('logCount').textContent = state.events + (state.events === 1 ? ' event' : ' events');
+    }
+
+    function updateKpis() {
+      el('k_frames').textContent = state.frames.toLocaleString();
+      el('k_pairs').textContent = state.pairs.toLocaleString();
+      el('k_dis').textContent = state.disagreements.toLocaleString();
+
+      const disRate = state.pairs ? (state.disagreements / state.pairs * 100) : 0;
+      el('k_disrate').textContent = disRate.toFixed(1) + '% of pairs';
+      el('tile_dis').className = 'card kpi' + (state.disagreements > 0 ? ' alert' : '');
+
+      if (state.latCount) {
+        const avg = state.latSum / state.latCount;
+        el('k_lat').innerHTML = avg.toFixed(3) + '<small> ms</small>';
+        el('tile_lat').className = 'card kpi' + (avg < 4 ? ' good' : ' alert');
+        el('k_under').innerHTML = (state.under4 / state.latCount * 100).toFixed(1) + '<small> %</small>';
+      }
+      if (state.lastLat != null) el('k_last').textContent = 'last: ' + state.lastLat.toFixed(3) + ' ms';
+
+      const consPct = state.pairs ? (100 - disRate) : 0;
+      el('consBar').style.width = consPct + '%';
+      el('consBar').style.background = disRate > 20 ? 'var(--alert)' : 'var(--ok)';
+      el('consPct').textContent = state.pairs ? consPct.toFixed(0) + '%' : '—';
+    }
+
+    // ── Throughput (fps over ~1s sliding window) ──
+    setInterval(() => {
+      const now = performance.now();
+      rateWin = rateWin.filter((t) => now - t < 1000);
+      el('k_rate').textContent = rateWin.length + ' fps';
+    }, 500);
+
+    // ── Threshold control → POST /api/config (same origin) ──
+    const thr = el('thr');
+    thr.addEventListener('input', () => { el('thrVal').textContent = parseFloat(thr.value).toFixed(1); });
+    thr.addEventListener('change', () => {
+      const v = parseFloat(thr.value);
+      state.threshold = v;
+      const base = wsUrlInput.value.replace(/^ws/, 'http').replace(/\/$/, '');
+      fetch(base + '/api/config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driftThreshold: v })
+      }).catch(() => {});
+    });
+
+    // ── Canvas: divergence scatter ──
+    const cv = el('scatter'), cx = cv.getContext('2d');
+    const sp = el('spark'), spx = sp.getContext('2d');
+    function fit(canvas) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+        canvas.width = w * dpr; canvas.height = h * dpr;
+      }
+      return { dpr, w, h };
+    }
+
+    function draw() {
+      // ---- scatter ----
+      const { dpr, w, h } = fit(cv);
+      cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx.clearRect(0, 0, w, h);
+
+      // auto-scale to trail
+      let minX = -5, maxX = 5, minY = -5, maxY = 5;
+      const pts = state.trail;
+      if (pts.length) {
+        minX = minY = Infinity; maxX = maxY = -Infinity;
+        for (const p of pts) {
+          for (const q of [p.c, p.d]) {
+            minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+            minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+          }
+        }
+        const padX = (maxX - minX) * 0.15 || 1, padY = (maxY - minY) * 0.15 || 1;
+        minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+      }
+      const sx = (x) => ((x - minX) / (maxX - minX || 1)) * (w - 50) + 40;
+      const sy = (y) => h - 30 - ((y - minY) / (maxY - minY || 1)) * (h - 55);
+
+      // grid
+      cx.strokeStyle = '#111c30'; cx.lineWidth = 1;
+      cx.font = '10px "Fira Code", monospace'; cx.fillStyle = '#3b4a63';
+      for (let i = 0; i <= 5; i++) {
+        const gx = 40 + i / 5 * (w - 50);
+        cx.beginPath(); cx.moveTo(gx, 8); cx.lineTo(gx, h - 30); cx.stroke();
+        const gy = 8 + i / 5 * (h - 38);
+        cx.beginPath(); cx.moveTo(40, gy); cx.lineTo(w - 10, gy); cx.stroke();
+      }
+      cx.fillText('x →', w - 34, h - 14);
+      cx.save(); cx.translate(12, 20); cx.fillText('y', 0, 0); cx.restore();
+
+      if (!pts.length) {
+        cx.fillStyle = '#334155'; cx.font = '13px "Fira Code", monospace';
+        cx.fillText('no aligned camera+depth pairs yet', 52, h / 2);
+      }
+
+      // trail (older = fainter)
+      pts.forEach((p, i) => {
+        const a = (i + 1) / pts.length;
+        const cxp = sx(p.c.x), cyp = sy(p.c.y), dxp = sx(p.d.x), dyp = sy(p.d.y);
+        // link
+        cx.strokeStyle = p.bad ? `rgba(239,68,68,${a})` : `rgba(34,197,94,${a * 0.7})`;
+        cx.lineWidth = p.bad ? 2 : 1;
+        cx.beginPath(); cx.moveTo(cxp, cyp); cx.lineTo(dxp, dyp); cx.stroke();
+        const latest = i === pts.length - 1;
+        // camera point
+        cx.fillStyle = `rgba(34,211,238,${a})`;
+        cx.beginPath(); cx.arc(cxp, cyp, latest ? 6 : 3, 0, 7); cx.fill();
+        // depth point
+        cx.fillStyle = `rgba(245,158,11,${a})`;
+        cx.beginPath(); cx.arc(dxp, dyp, latest ? 6 : 3, 0, 7); cx.fill();
+        if (latest && p.bad) {
+          cx.strokeStyle = 'rgba(239,68,68,.6)'; cx.lineWidth = 1.5;
+          cx.beginPath(); cx.arc(cxp, cyp, 12, 0, 7); cx.stroke();
+        }
+      });
+
+      // ---- sparkline ----
+      const s = fit(sp);
+      spx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+      spx.clearRect(0, 0, s.w, s.h);
+      const hist = state.latHist;
+      // 4ms target line
+      const maxV = Math.max(4.5, ...hist, 0.1);
+      const ty = s.h - 18 - (4 / maxV) * (s.h - 26);
+      spx.strokeStyle = 'rgba(245,158,11,.5)'; spx.setLineDash([4, 4]); spx.lineWidth = 1;
+      spx.beginPath(); spx.moveTo(0, ty); spx.lineTo(s.w, ty); spx.stroke(); spx.setLineDash([]);
+      spx.fillStyle = '#f59e0b'; spx.font = '10px "Fira Code", monospace';
+      spx.fillText('4ms', 4, ty - 4);
+
+      if (hist.length > 1) {
+        const step = s.w / (hist.length - 1);
+        spx.beginPath();
+        hist.forEach((v, i) => {
+          const x = i * step, y = s.h - 18 - (v / maxV) * (s.h - 26);
+          i ? spx.lineTo(x, y) : spx.moveTo(x, y);
+        });
+        spx.strokeStyle = '#22d3ee'; spx.lineWidth = 1.5; spx.stroke();
+        spx.lineTo(s.w, s.h - 18); spx.lineTo(0, s.h - 18); spx.closePath();
+        spx.fillStyle = 'rgba(34,211,238,.08)'; spx.fill();
+      } else {
+        spx.fillStyle = '#334155'; spx.font = '12px "Fira Code", monospace';
+        spx.fillText('collecting latency samples…', 10, s.h / 2);
+      }
+
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    connect();
+  })();
+  </script>
+</body>
+</html>

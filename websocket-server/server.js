@@ -7,6 +7,7 @@
  */
 
 const http = require('http');
+const path = require('path');
 const express = require('express');
 const WebSocket = require('ws');
 const { ArbitrationEngine } = require('./arbitrationEngine');
@@ -28,6 +29,10 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
+
+// Serve the real-time dashboard (Muhammad Ammar's frontend) as static assets.
+// Root '/' returns the dashboard; it connects back to this same-origin WebSocket.
+app.use(express.static(path.join(__dirname, '..', 'dashboard')));
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
