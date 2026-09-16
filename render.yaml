@@ -1,0 +1,27 @@
+# Render Blueprint — Multi-Modal Consensus Broker (Telemetry Core Engine)
+# Deploys the WebSocket + arbitration + persistence server from the repo Dockerfile.
+# MongoDB is external (Atlas), so no database service is defined here.
+#
+# Deploy: Render Dashboard → New → Blueprint → pick this repo.
+# Then set MONGODB_URI in the service's Environment tab (it is marked sync:false
+# so it is NOT stored in git — paste the Atlas connection string there).
+services:
+  - type: web
+    name: consensus-broker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Render injects PORT automatically; the server reads process.env.PORT.
+      # Do NOT set PORT/WS_PORT here or it would override Render's routing.
+      - key: NODE_ENV
+        value: production
+      - key: DRIFT_THRESHOLD
+        value: "4.0"
+      # Atlas connection string — set manually in the dashboard (never committed).
+      # Requires Atlas Network Access to allow 0.0.0.0/0 (Render egress is dynamic).
+      - key: MONGODB_URI
+        sync: false
