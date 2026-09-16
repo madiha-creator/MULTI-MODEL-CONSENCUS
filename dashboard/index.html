@@ -77,6 +77,10 @@
     }
     button:hover { background: #16233b; border-color: #2b3b57; }
     button:focus-visible { outline: 2px solid var(--camera); outline-offset: 2px; }
+    .demo-btn { background: var(--ok); border-color: var(--ok); color: #04220f; font-weight: 600; }
+    .demo-btn:hover { background: #16a34a; border-color: #16a34a; }
+    .demo-btn.running { background: var(--alert); border-color: var(--alert); color: #fff; box-shadow: 0 0 14px rgba(239,68,68,.45); }
+    .demo-btn.running:hover { background: #dc2626; border-color: #dc2626; }
 
     /* ── Layout ─────────────────────────────────────────── */
     main { padding: 18px 22px 28px; max-width: 1500px; margin: 0 auto; }
@@ -176,6 +180,7 @@
     </div>
     <div class="status"><span class="dot" id="dot"></span><span id="statusText">connecting…</span></div>
     <div class="conn">
+      <button id="demo" type="button" class="demo-btn">▶ Start Demo</button>
       <label for="wsUrl" style="position:absolute;left:-9999px">WebSocket URL</label>
       <input id="wsUrl" spellcheck="false" />
       <button id="reconnect" type="button">Reconnect</button>
@@ -521,6 +526,58 @@
       requestAnimationFrame(draw);
     }
     requestAnimationFrame(draw);
+
+    // ── In-browser demo generator ────────────────────────────────────────────
+    // Mirrors mock-generator/mockGenerator.js: sinusoidal motion + Gaussian noise
+    // + periodic drift bursts. Sends camera & depth readings (identical timestamp,
+    // the engine's cross-modality join key) over this same WebSocket. The server
+    // arbitrates and broadcasts TELEMETRY_ARBITRATED back, which this UI renders.
+    const DEMO = {
+      timer: null, seq: { camera: 0, depth: 0 },
+      driftFor: null, driftEnd: 0, lastActivation: 0,
+      intervalMs: 600, driftProb: 0.25, driftDur: 3000, driftMag: 5.0, noise: 0.3,
+    };
+    function gauss(sd) {
+      let u = 0, v = 0;
+      while (u === 0) u = Math.random();
+      while (v === 0) v = Math.random();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) * sd;
+    }
+    function demoReading(sensor, now) {
+      const t = now / 1000;
+      const base = { x: 50 + 30 * Math.sin(t * 0.1), y: 50 + 30 * Math.cos(t * 0.15), z: 0 };
+      const drift = DEMO.driftFor === sensor ? (Math.random() < 0.5 ? -1 : 1) * DEMO.driftMag : 0;
+      const conf = DEMO.driftFor === sensor ? 0.6 : 0.95;
+      return {
+        nodeId: 'edge-node-01', sensorType: sensor, sequenceNo: DEMO.seq[sensor]++,
+        timestamp: now,
+        coordinates: { x: base.x + gauss(DEMO.noise) + drift, y: base.y + gauss(DEMO.noise), z: base.z + gauss(DEMO.noise) },
+        confidence: parseFloat(conf.toFixed(2)),
+      };
+    }
+    function demoTick() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (DEMO.driftFor && now >= DEMO.driftEnd) DEMO.driftFor = null;
+      if (!DEMO.driftFor && now - DEMO.lastActivation > 800 && Math.random() < DEMO.driftProb) {
+        DEMO.driftFor = Math.random() < 0.5 ? 'camera' : 'depth';
+        DEMO.driftEnd = now + DEMO.driftDur; DEMO.lastActivation = now;
+      }
+      ws.send(JSON.stringify(demoReading('camera', now)));
+      ws.send(JSON.stringify(demoReading('depth', now)));
+    }
+    const demoBtn = el('demo');
+    function stopDemo() {
+      clearInterval(DEMO.timer); DEMO.timer = null; DEMO.driftFor = null;
+      demoBtn.textContent = '▶ Start Demo'; demoBtn.classList.remove('running');
+    }
+    demoBtn.onclick = () => {
+      if (DEMO.timer) { stopDemo(); return; }
+      if (!ws || ws.readyState !== WebSocket.OPEN) connect();
+      DEMO.timer = setInterval(demoTick, DEMO.intervalMs);
+      demoTick();
+      demoBtn.textContent = '■ Stop Demo'; demoBtn.classList.add('running');
+    };
 
     connect();
   })();
